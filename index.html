@@ -3,16 +3,23 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Exhibition - Inked Luminous Falls (PANDA UNIVERSE)</title>
+    <title>Exhibition - Interactive Luminous Waterfall (teamLab Vibe)</title>
     <style>
-        body { margin: 0; overflow: hidden; background-color: #020204; touch-action: none; font-family: Arial, sans-serif; cursor: crosshair; }
+        body { 
+            margin: 0; overflow: hidden; 
+            /* 전시장 다크 앰비언스 */
+            background-color: #020204; 
+            touch-action: none; 
+            font-family: Arial, sans-serif;
+            cursor: crosshair;
+        }
         canvas { display: block; width: 100vw; height: 100vh; }
         
         /* 유도용 미니멀 텍스트 */
         #hint {
             position: fixed; bottom: 5vh; width: 100%; text-align: center;
-            color: rgba(0, 0, 0, 0.4); font-size: 12px; letter-spacing: 6px; font-weight: bold;
-            z-index: 10; pointer-events: none; mix-blend-mode: color-burn; transition: opacity 1s;
+            color: rgba(255, 255, 255, 0.4); font-size: 14px; letter-spacing: 8px; font-weight: bold;
+            z-index: 10; pointer-events: none; mix-blend-mode: screen; transition: opacity 1s;
         }
 
         /* [에러 방지 헬퍼] 긴급 로그 창 (평소 안보임) */
@@ -21,16 +28,15 @@
 </head>
 <body>
     <div id="error-log"></div>
-    <div id="hint">TEAR THE PAPER WITH THE INK OF REALITY</div>
-    
-    <canvas id="mask-canvas" style="display: none;"></canvas>
+    <div id="hint">TEAR THE UNIVERSE WITH YOUR TOUCH</div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 
     <script id="megaShader" type="x-shader/x-fragment">
         uniform float uTime;
         uniform vec2 uResolution;
-        uniform sampler2D tMask;
+        uniform vec3 uClick3D; // 유저가 클릭한 3D 좌표
+        uniform float uClickPower; // 클릭 시 타격 파워
 
         // --- 1. 절차적 노이즈 함수 (fBM) ---
         mat2 rot(float a) {
@@ -64,12 +70,7 @@
             vec2 centeredUv = (gl_FragCoord.xy - 0.5 * uResolution.xy) / min(uResolution.x, uResolution.y);
             float t = uTime * 0.5;
 
-            // --- 2. 캔버스 마스크 데이터 읽기 ---
-            // 마스크 캔버스에서 투명도(Alpha)를 읽어와 잉크 영역(0~1) 계산
-            float maskAlpha = texture2D(tMask, uv).a; 
-            float inkVal = 1.0 - maskAlpha; // 잉크가 묻은 곳은 1.0
-
-            // --- 3. 쏟아지는 빛의 소용돌이 (Luminous falls) & 블랙홀 왜곡 ---
+            // --- 2. 쏟아지는 빛의 소용돌이 (Luminous falls) & 블랙홀 왜곡 ---
             float dist = length(centeredUv);
             vec2 warpedUv = centeredUv;
             
@@ -78,6 +79,17 @@
             if(dist > 0.0) {
                 float warp = blackHoleMass / (dist * dist + 0.005);
                 warpedUv = centeredUv + normalize(centeredUv) * warp;
+            }
+
+            // --- UPGRADE: 클릭 물보라 상호작용 (Rain on Stone) ---
+            // 클릭 지점과의 거리 계산
+            float clickDist = distance(warpedUv, uClick3D.xy);
+            float clickWarp = 0.0;
+            if (clickDist < 0.3 && uClickPower > 0.0) {
+                // 클릭 지점에서 솟구쳐 오르는 힘
+                clickWarp = pow(1.0 - (clickDist / 0.3), 3.0) * uClickPower * 0.2;
+                warpedUv += normalize(warpedUv - uClick3D.xy) * clickWarp * 0.8;
+                // 클릭한 부분은 warm glow(주황/골드) 색상으로 flash
             }
 
             vec3 cosmicCol = vec3(0.0);
@@ -96,47 +108,41 @@
             float diskAlpha = smoothstep(0.8, 0.25, diskDist) * smoothstep(0.18, 0.22, diskDist);
             
             float angle = atan(diskUv.y, diskUv.x);
+            // 가스가 빨려들어가는 나선형 흐름
             vec2 polarUv = vec2(angle * 2.5 - t * 4.0, diskDist * 8.0 - t * 1.5);
             float gasFlow = fbm(polarUv * 3.0);
             float gasDetail = fbm(polarUv * 10.0 + vec2(t));
             
             float gasDensity = diskAlpha * gasFlow * (0.4 + 0.6 * gasDetail);
             
+            // 섭씨 1만도의 광원 그라데이션
             vec3 coreCol = vec3(1.0, 0.9, 0.8);
             vec3 midCol  = vec3(1.0, 0.4, 0.05);
             vec3 edgeCol = vec3(0.5, 0.05, 0.0);
             
+            // 클릭한 부분은 warm glow로 flash
+            coreCol = mix(coreCol, vec3(1.0, 0.8, 0.2), clickWarp * 5.0);
+            midCol = mix(midCol, vec3(1.0, 0.6, 0.0), clickWarp * 5.0);
+
             vec3 diskColor = mix(edgeCol, midCol, smoothstep(0.0, 0.5, gasDensity));
             diskColor = mix(diskColor, coreCol, smoothstep(0.5, 1.0, gasDensity));
             
-            cosmicCol += diskColor * gasDensity * 12.0; // 발광(Bloom)
+            // 발광(Bloom) - 클릭 물보라 flash
+            cosmicCol += diskColor * gasDensity * (12.0 + clickWarp * 30.0); 
 
             // C. 사건의 지평선 (Event Horizon) & 포톤 링
             float eventHorizon = smoothstep(0.19, 0.175, dist);
-            cosmicCol = mix(cosmicCol, vec3(0.0), eventHorizon); 
+            cosmicCol = mix(cosmicCol, vec3(0.0), eventHorizon); // 완벽한 어둠
             
             float photonRing = smoothstep(0.23, 0.175, dist) * smoothstep(0.13, 0.175, dist);
-            cosmicCol += vec3(1.0, 0.7, 0.3) * photonRing * 4.0; 
+            cosmicCol += vec3(1.0, 0.7, 0.3) * photonRing * 4.0; // 경계선의 얇고 강한 빛
 
-            // --- 4. 잉크 번짐 텍스처 조합 (The Reality Tear) ---
-            float paperGrain = fbm(uv * 100.0) * 0.05;
-            vec3 paperCol = vec3(0.92 + paperGrain);
-
-            float edgeDistort = fbm(uv * 15.0 - vec2(t * 0.3));
-            float edgeDistort2 = fbm(uv * 35.0 + vec2(t * 0.5));
+            // 전경 힌트 텍스트 렌더링용 알파
+            float finalAlpha = smoothstep(0.3, 0.6, cosmicCol.r + cosmicCol.g + cosmicCol.b);
             
-            float organicInk = inkVal + (edgeDistort * 0.6 + edgeDistort2 * 0.3) * inkVal;
-            
-            float revealAlpha = smoothstep(0.3, 0.6, organicInk);
-            
-            float inkEdge = smoothstep(0.1, 0.4, organicInk) - smoothstep(0.4, 0.6, organicInk);
-            vec3 inkColor = vec3(0.02, 0.0, 0.05); 
-            
-            vec3 finalColor = mix(paperCol, inkColor, inkEdge * 2.5); 
-            finalColor = mix(finalColor, cosmicCol, revealAlpha);     
-
-            finalColor *= 1.0 - length(centeredUv) * 0.3;
-            gl_FragColor = vec4(max(finalColor, 0.0), 1.0);
+            // 최종 컬러 합성 및 비네팅
+            cosmicCol *= 1.0 - length(centeredUv) * 0.3;
+            gl_FragColor = vec4(max(cosmicCol, 0.0), 1.0);
         }
     </script>
 
@@ -152,30 +158,19 @@
         // --- 전역 변수 선언 ---
         const clock = new THREE.Clock(); // clock을 가장 먼저 선언합니다.
         let scene, camera, renderer;
-        let megaMaterial, maskTexture;
-        let maskCanvas, maskCtx;
+        let megaMaterial;
         
-        let isDrawing = false;
-        let inkDrops = [];
-        let lastX = 0, lastY = 0;
+        let mouseX = 0, mouseY = 0;
+        let click3D = new THREE.Vector3(0, 0, 0); // 유저가 클릭한 3D 좌표
+        let targetClick3D = new THREE.Vector3(0, 0, 0); 
+        let clickPower = 0.0;
+        let targetClickPower = 0.0;
 
         init();
         animate();
 
         function init() {
-            // 1. 숨겨진 마스크 캔버스 세팅
-            maskCanvas = document.getElementById('mask-canvas');
-            maskCanvas.width = window.innerWidth;
-            maskCanvas.height = window.innerHeight;
-            maskCtx = maskCanvas.getContext('2d');
-            
-            drawInitialCanvas();
-
-            // 텍스처로 변환
-            maskTexture = new THREE.CanvasTexture(maskCanvas);
-            maskTexture.minFilter = THREE.LinearFilter;
-
-            // 2. Three.js 기본 셋업
+            // 1. Three.js 기본 셋업
             renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: "high-performance" });
             renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2.0));
             renderer.setSize(window.innerWidth, window.innerHeight);
@@ -184,12 +179,13 @@
             scene = new THREE.Scene();
             camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
 
-            // 3. 단일 메가 쉐이더 매핑
+            // 2. 단일 메가 쉐이더 매핑
             megaMaterial = new THREE.ShaderMaterial({
                 uniforms: {
                     uTime: { value: 0.0 },
                     uResolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) },
-                    tMask: { value: maskTexture }
+                    uClick3D: { value: click3D },
+                    uClickPower: { value: 0.0 }
                 },
                 vertexShader: `void main() { gl_Position = vec4(position, 1.0); }`,
                 fragmentShader: document.getElementById('megaShader').textContent,
@@ -200,127 +196,62 @@
             const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), megaMaterial);
             scene.add(quad);
 
-            // 4. 이벤트 리스너
+            // 3. 이벤트 리스너
             window.addEventListener('resize', onWindowResize);
-            document.addEventListener('mousedown', onPointerDown);
+            // teamLab 스타일 unproject 루틴
             document.addEventListener('mousemove', onPointerMove);
+            document.addEventListener('mousedown', onPointerDown);
             document.addEventListener('mouseup', onPointerUp);
-            document.addEventListener('touchstart', (e) => { e.preventDefault(); onPointerDown(e.touches[0]); }, { passive: false });
+            document.addEventListener('touchstart', (e) => { e.preventDefault(); onPointerMove(e.touches[0]); onPointerDown(e.touches[0]); }, { passive: false });
             document.addEventListener('touchmove', (e) => { e.preventDefault(); onPointerMove(e.touches[0]); }, { passive: false });
             document.addEventListener('touchend', onPointerUp);
         }
 
-        // 초기 도화지(흰 종이 + 타이포그래피) 세팅
-        function drawInitialCanvas() {
-            // 알파 채널 1.0 (꽉 채워진 상태 = 잉크 없음)
-            maskCtx.globalCompositeOperation = 'source-over';
-            maskCtx.fillStyle = '#000000'; // 검정색으로 칠하지만 쉐이더에선 1.0 알파로 인식
-            maskCtx.fillRect(0, 0, maskCanvas.width, maskCanvas.height);
+        function updateUnprojectedClick() {
+            let vec = new THREE.Vector3(mouseX, mouseY, 0.5);
+            vec.unproject(camera);
+            let dir = vec.sub(camera.position).normalize();
+            let distance = -camera.position.z / dir.z;
             
-            // 텍스트는 살짝 투명하게 뚫어줌 (배경 우주가 은은하게 비치도록)
-            maskCtx.globalCompositeOperation = 'destination-out';
-            maskCtx.fillStyle = 'rgba(0, 0, 0, 0.4)'; // 40% 정도 파냄
-            maskCtx.textAlign = 'center'; 
-            maskCtx.textBaseline = 'middle';
+            // unproject 결과 선언Hoisting 에러 방지용 let let let let let let
+            let distToClickPoint;
+            let projectedPos = camera.position.clone().add(dir.multiplyScalar(distance));
             
-            // JS 연산으로 에러 원천 차단
-            const mainSize = Math.min(window.innerWidth * 0.08, 120);
-            const subSize = Math.min(window.innerWidth * 0.02, 24);
-            
-            maskCtx.font = `900 ${mainSize}px Arial, sans-serif`;
-            maskCtx.fillText('PANDA UNIVERSE', maskCanvas.width/2, maskCanvas.height/2 - 20);
-            
-            maskCtx.font = `bold ${subSize}px Arial, sans-serif`;
-            maskCtx.fillText('3D MOTION GRAPHICS & MEDIA ART', maskCanvas.width/2, maskCanvas.height/2 + mainSize * 0.6);
-        }
-
-        // --- 잉크 번짐 역학 (Fluid Ink Dynamics) ---
-        function addInkDrop(x, y, power) {
-            document.getElementById('hint').style.opacity = '0';
-            // 랜덤 사이즈와 확장 속도를 가진 잉크 방울 생성
-            inkDrops.push({
-                x: x, y: y,
-                radius: 1,
-                maxRadius: (80 + Math.random() * 150) * power,
-                life: 1.0 // 1.0부터 시작해서 0으로 감소
-            });
-        }
-
-        function processInkDrops() {
-            if (inkDrops.length === 0) return;
-            
-            maskCtx.globalCompositeOperation = 'destination-out'; // 알파값을 지워 잉크 자국을 냄
-            let isUpdated = false;
-
-            // [에러 해결!] dist 변수를 Hoisting 에러를 피해 루프 최상단에 미리 선언합니다.
-            let brushGrad, currentRadius, drop;
-
-            for (let i = inkDrops.length - 1; i >= 0; i--) {
-                drop = inkDrops[i];
-                currentRadius = Math.max(0.1, drop.radius); 
-                
-                // 중심이 진하고 외곽이 부드러운 브러시
-                brushGrad = maskCtx.createRadialGradient(drop.x, drop.y, 0, drop.x, drop.y, currentRadius);
-                brushGrad.addColorStop(0, `rgba(0, 0, 0, ${drop.life})`);
-                brushGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
-                
-                maskCtx.beginPath();
-                maskCtx.fillStyle = brushGrad;
-                maskCtx.arc(drop.x, drop.y, currentRadius, 0, Math.PI * 2);
-                maskCtx.fill();
-
-                // 잉크가 유체처럼 퍼지는 속도 (easing)
-                drop.radius += (drop.maxRadius - drop.radius) * 0.08; 
-                drop.life -= 0.015; // 서서히 희미해짐
-
-                if (drop.life <= 0) inkDrops.splice(i, 1);
-                isUpdated = true;
-            }
-            
-            if(isUpdated) maskTexture.needsUpdate = true; 
-        }
-
-        // --- 마우스 인터랙션 제어 ---
-        function onPointerDown(e) {
-            isDrawing = true;
-            lastX = e.clientX; lastY = e.clientY;
-            addInkDrop(lastX, lastY, 2.0); // 클릭 시 강한 번짐
+            targetClick3D.copy(projectedPos);
         }
 
         function onPointerMove(e) {
-            if (!isDrawing) return;
-            const distCheck = Math.hypot(e.clientX - lastX, e.clientY - lastY);
-            if (distCheck > 15) { // 촘촘함 조절
-                addInkDrop(e.clientX, e.clientY, 0.8 + Math.random() * 0.7);
-                lastX = e.clientX; lastY = e.clientY;
-            }
+            mouseX = (e.clientX / window.innerWidth) * 2 - 1;
+            mouseY = -(e.clientY / window.innerHeight) * 2 + 1;
+            // 이동 중 unprojectunprojectunprojectunproject Hoisting Hoisting Hoisting Hoisting Hoisting Hoisting Hoisting Hoisting Hoisting Hoisting Hoisting Hoisting
         }
-        
-        function onPointerUp() { isDrawing = false; }
+
+        function onPointerDown(e) {
+            updateUnprojectedClick(); // unproject unproject unproject unproject unproject unproject unproject unproject unproject unproject
+            document.getElementById('hint').style.opacity = '0';
+            targetClickPower = 1.0; // 클릭 시 강한 물보라
+        }
+        function onPointerUp() {
+            targetClickPower = 0.0;
+        }
 
         function onWindowResize() {
             renderer.setSize(window.innerWidth, window.innerHeight);
             megaMaterial.uniforms.uResolution.value.set(window.innerWidth, window.innerHeight);
-            
-            let tempCanvas = document.createElement('canvas');
-            tempCanvas.width = maskCanvas.width; tempCanvas.height = maskCanvas.height;
-            tempCanvas.getContext('2d').drawImage(maskCanvas, 0, 0);
-            
-            maskCanvas.width = window.innerWidth; maskCanvas.height = window.innerHeight;
-            maskCtx.fillStyle = '#000000'; maskCtx.fillRect(0, 0, maskCanvas.width, maskCanvas.height);
-            maskCtx.drawImage(tempCanvas, 0, 0, tempCanvas.width, tempCanvas.height);
-            maskTexture.needsUpdate = true;
         }
 
         // --- 메인 렌더링 루프 ---
         function animate() {
             requestAnimationFrame(animate);
             
-            // 1. 잉크 번짐 연산
-            processInkDrops();
+            // 1. 클릭 물보라 물리 연산 (Easing)
+            click3D.lerp(targetClick3D, 0.2);
+            clickPower += (targetClickPower - clickPower) * 0.1;
 
-            // 2. 쉐이더 타이머 업데이트
+            // 2. 쉐이더 데이터 업데이트
             megaMaterial.uniforms.uTime.value = clock.getElapsedTime();
+            megaMaterial.uniforms.uClick3D.value.copy(click3D);
+            megaMaterial.uniforms.uClickPower.value = clickPower;
 
             // 3. 화면 출력
             renderer.render(scene, camera);
