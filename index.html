@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Liquid Metal Magnetic - Vibe Coding</title>
+    <style>
+        body { 
+            margin: 0; overflow: hidden; 
+            background-color: #050505; /* 딥 다크 그레이 배경 */
+            touch-action: none; 
+        }
+        canvas { display: block; width: 100vw; height: 100vh; }
+        
+        /* 에러 발생 시 화면에 띄워주는 안전장치 */
+        #error-log { 
+            position: fixed; top: 0; left: 0; background: rgba(255,0,0,0.8); 
+            color: #fff; z-index: 9999; font-family: monospace; padding: 10px; 
+            display: none; pointer-events: none; 
+        }
+        
+        /* 로딩 텍스트 (옵션) */
+        #ui-layer {
+            position: fixed; bottom: 30px; width: 100%; text-align: center;
+            color: rgba(255, 255, 255, 0.4); font-family: sans-serif;
+            font-size: 14px; letter-spacing: 2px; pointer-events: none;
+            user-select: none;
+        }
+    </style>
+</head>
+<body>
+    <div id="error-log"></div>
+    <div id="ui-layer">DRAG TO INTERACT</div>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+    <script id="vertexShader" type="x-shader/x-vertex">
+        varying vec2 vUv;
+        void main() {
+            vUv = uv;
+            gl_Position = vec4(position, 1.0);
+        }
+    </script>
+
+    <script id="fragmentShader" type="x-shader/x-fragment">
+        uniform float uTime;
+        uniform vec2 uResolution;
+        uniform vec2 uMouse;
+        uniform float uTension; // 클릭 시 자력 강도
+        
+        varying vec2 vUv;
+
+        // Smooth Minimum 함수: 두 물체가 찰흙처럼 스-윽 섞이게 해주는 마법의 공식
+        float smin(float a, float b, float k) {
+            float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);
+            return mix(b, a, h) - k * h * (1.0 - h);
+        }
+
+        // 3D 회전 함수
+        mat2 rot(float a) {
+            float s = sin(a), c = cos(a);
+            return mat2(c, -s, s, c);
+        }
+
+        // SDF (Signed Distance Field): 공간에 물체를 정의
+        float map(vec3 p) {
+            // 1. 중앙의 거대한 액체 본체
+            float centerBlob = length(p) - 1.2;
+            
+            // 본체가 가만히 있지 않고 숨쉬듯 꿈틀거리게 만듦
+            centerBlob += sin(p.x * 3.0 + uTime * 2.0) * 0.05;
+            centerBlob += cos(p.y * 2.0 + uTime * 1.5) * 0.05;
+
+            // 2. 마우스를 따라다니는 작은 자석 물방울
+            vec3 mousePos3D = vec3(uMouse.x * 3.5, uMouse.y * 3.5, 0.0);
+            float mouseBlob = length(p - mousePos3D) - (0.4 + uTension * 0.2); // 클릭하면 커짐
+
+            // 3. 배경에 떠다니는 위성 물방울들
+            vec3 orbitPos = vec3(sin(uTime) * 1.8, cos(uTime * 1.3) * 1.5, sin(uTime * 0.8) * 1.0);
+            float orbitBlob = length(p - orbitPos) - 0.3;
+
+            // 물방울들을 smin으로 쫀득하게 결합 (0.6 ~ 0.8 수치가 결합 강도)
+            float d = smin(centerBlob, mouseBlob, 0.8 + uTension * 0.4);
+            d = smin(d, orbitBlob, 0.6);
+            
+            return d;
+        }
+
+        // 빛 반사를 위한 법선(Normal) 벡터 계산
+        vec3 calcNormal(vec3 p) {
+            const vec2 e = vec2(0.001, 0.0);
+            return normalize(vec3(
+                map(p + e.xyy) - map(p - e.xyy),
+                map(p + e.yxy) - map(p - e.yxy),
+                map(p + e.yyx) - map(p - e.yyx)
+            ));
+        }
+
+        void main() {
+            // 화면 좌표 정규화 (-1.0 ~ 1.0)
+            vec2 uv = (gl_FragCoord.xy - 0.5 * uResolution.xy) / min(uResolution.y, uResolution.x);
+
+            // 카메라 설정
+            vec3 ro = vec3(0.0, 0.0, 5.0); // 카메라 위치
+            vec3 rd = normalize(vec3(uv, -1.5)); // 렌즈 방향
+
+            // 레이마칭(Raymarching) 루프
+            float t = 0.0;
+            float d = 0.0;
+            for(int i = 0; i < 80; i++) {
+                vec3 p = ro + rd * t;
+                d = map(p);
+                if(d < 0.001 || t > 10.0) break;
+                t += d;
+            }
+
+            vec3 col = vec3(0.05); // 기본 배경색 (어두운 공간)
+
+            // 물체에 맞았을 때 (질감 렌더링)
+            if(d < 0.001) {
+                vec3 p = ro + rd * t;
+                vec3 n = calcNormal(p);
+                
+                // 크롬(Chrome) 액체 금속 질감을 위한 절차적 라이팅 세팅
+                vec3 viewDir = normalize(ro - p);
+                vec3 ref = reflect(-viewDir, n); // 반사 벡터
+                
+                // 가상의 스튜디오 조명 (환경맵 흉내내기)
+                float light1 = clamp(dot(n, normalize(vec3(1.0, 1.0, 1.0))), 0.0, 1.0);
+                float light2 = clamp(dot(n, normalize(vec3(-1.0, -1.0, 1.0))), 0.0, 1.0);
+                
+                // 반사광(Specular) 연산 (날카롭고 쨍하게)
+                float spec = pow(clamp(dot(ref, normalize(vec3(0.0, 1.0, 1.0))), 0.0, 1.0), 32.0);
+                float spec2 = pow(clamp(dot(ref, normalize(vec3(1.0, -1.0, 0.5))), 0.0, 1.0), 16.0);
+                
+                // 프레넬(Fresnel) 효과: 외곽으로 갈수록 반사율이 높아짐
+                float fresnel = pow(1.0 - clamp(dot(n, viewDir), 0.0, 1.0), 4.0);
+
+                // 색상 조합 (은빛 금속에 약간의 네온 블루/퍼플 반사광 섞기)
+                vec3 baseColor = vec3(0.8, 0.85, 0.9); // 은빛
+                vec3 rimColor = vec3(0.2, 0.5, 1.0); // 외곽 푸른빛 (Vibe)
+                
+                col = baseColor * (light1 * 0.7 + light2 * 0.3) + vec3(0.1);
+                col = mix(col, rimColor, fresnel * 0.8);
+                col += vec3(1.0) * spec * 1.5; // 강한 하이라이트
+                col += vec3(0.8, 0.2, 1.0) * spec2 * 0.8; // 보조 퍼플 하이라이트
+            }
+
+            // 부드러운 비네팅(Vignette) 효과
+            col *= 1.0 - length(uv) * 0.3;
+
+            // 감마 보정
+            gl_FragColor = vec4(pow(col, vec3(1.0 / 2.2)), 1.0);
+        }
+    </script>
+
+    <script>
+        // 에러 로깅 안전장치
+        window.onerror = function(msg, url, line) {
+            let errDiv = document.getElementById('error-log');
+            errDiv.style.display = 'block';
+            errDiv.innerHTML += msg + ' (Line: ' + line + ')<br>';
+            return false;
+        };
+
+        let camera, scene, renderer;
+        let uniforms;
+        
+        // 마우스 및 물리 엔진 변수
+        let targetMouse = new THREE.Vector2(0, 0); // 실제 마우스 위치
+        let springMouse = new THREE.Vector2(0, 0); // 탄성으로 따라가는 위치
+        let mouseVelocity = new THREE.Vector2(0, 0);
+        let isMouseDown = false;
+        let tensionValue = 0.0; // 클릭 시 올라가는 텐션 값
+
+        init();
+        animate(0);
+
+        function init() {
+            // 화면 꽉 차는 평면 카메라 세팅
+            camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+            scene = new THREE.Scene();
+
+            const geometry = new THREE.PlaneGeometry(2, 2);
+
+            // 쉐이더로 데이터 전달 (Uniforms)
+            uniforms = {
+                uTime: { value: 1.0 },
+                uResolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) },
+                uMouse: { value: new THREE.Vector2(0, 0) },
+                uTension: { value: 0.0 }
+            };
+
+            const material = new THREE.ShaderMaterial({
+                uniforms: uniforms,
+                vertexShader: document.getElementById('vertexShader').textContent,
+                fragmentShader: document.getElementById('fragmentShader').textContent
+            });
+
+            const mesh = new THREE.Mesh(geometry, material);
+            scene.add(mesh);
+
+            renderer = new THREE.WebGLRenderer({ antialias: false }); // 쉐이더 처리이므로 antialias 끔
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2.0)); // 모바일 발열 방지
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            document.body.appendChild(renderer.domElement);
+
+            // 이벤트 리스너 등록
+            window.addEventListener('resize', onWindowResize, false);
+            
+            document.addEventListener('mousemove', onMouseMove, false);
+            document.addEventListener('mousedown', () => isMouseDown = true, false);
+            document.addEventListener('mouseup', () => isMouseDown = false, false);
+            
+            document.addEventListener('touchstart', onTouchStart, { passive: false });
+            document.addEventListener('touchmove', onTouchMove, { passive: false });
+            document.addEventListener('touchend', () => isMouseDown = false, { passive: false });
+        }
+
+        // 마우스 좌표를 정규화 (-1.0 ~ 1.0 비율)
+        function updateMouse(x, y) {
+            targetMouse.x = (x / window.innerWidth) * 2 - 1;
+            targetMouse.y = -(y / window.innerHeight) * 2 + 1;
+            
+            // 화면 비율에 맞춰 X축 보정
+            targetMouse.x *= window.innerWidth / window.innerHeight;
+        }
+
+        function onMouseMove(event) { updateMouse(event.clientX, event.clientY); }
+        
+        function onTouchStart(event) {
+            if(event.touches.length > 0) {
+                isMouseDown = true;
+                updateMouse(event.touches[0].clientX, event.touches[0].clientY);
+                // 터치하자마자 스프링 마우스를 즉시 위치시켜 이질감 제거
+                springMouse.copy(targetMouse);
+            }
+        }
+        
+        function onTouchMove(event) {
+            if(event.touches.length > 0) {
+                event.preventDefault();
+                updateMouse(event.touches[0].clientX, event.touches[0].clientY);
+            }
+        }
+
+        function onWindowResize() {
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            uniforms.uResolution.value.set(window.innerWidth, window.innerHeight);
+        }
+
+        function animate(time) {
+            requestAnimationFrame(animate);
+
+            // 1. 스프링 물리 엔진 연산 (쫀득하고 찰진 손맛의 핵심)
+            const stiffness = isMouseDown ? 0.2 : 0.08; // 누르면 팽팽하게 더 잘 따라옴
+            const friction = isMouseDown ? 0.7 : 0.85;  // 마찰력
+
+            mouseVelocity.x += (targetMouse.x - springMouse.x) * stiffness;
+            mouseVelocity.y += (targetMouse.y - springMouse.y) * stiffness;
+            mouseVelocity.multiplyScalar(friction);
+            
+            springMouse.add(mouseVelocity);
+
+            // 2. 텐션 값 연산 (누르면 자력이 강해지며 스-윽 부풀어 오름)
+            let targetTension = isMouseDown ? 1.0 : 0.0;
+            tensionValue += (targetTension - tensionValue) * 0.1;
+
+            // 3. 쉐이더로 데이터 쏴주기
+            uniforms.uTime.value = time * 0.001; // 초 단위 변환
+            uniforms.uMouse.value.copy(springMouse);
+            uniforms.uTension.value = tensionValue;
+
+            // 화면 그리기
+            renderer.render(scene, camera);
+        }
+    </script>
+</body>
+</html>
