@@ -3,19 +3,21 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Exhibition - teamLab Waterfall Splash</title>
+    <title>teamLab Vibe - Interactive Luminous Waterfall</title>
     <style>
         body { 
             margin: 0; overflow: hidden; 
-            background-color: #000000; /* 완전한 어둠 */
+            background-color: #000005; /* 전시장 심연의 어둠 */
             touch-action: none; 
+            font-family: 'Helvetica Neue', Arial, sans-serif;
+            cursor: crosshair;
         }
-        canvas { display: block; width: 100vw; height: 100vh; cursor: crosshair; }
+        canvas { display: block; width: 100vw; height: 100vh; }
         
         #hint {
             position: fixed; bottom: 5vh; width: 100%; text-align: center;
-            color: rgba(255, 255, 255, 0.4); font-size: 14px; letter-spacing: 8px; font-weight: bold;
-            font-family: Arial, sans-serif; z-index: 10; pointer-events: none; transition: opacity 0.5s;
+            color: rgba(255, 255, 255, 0.4); font-size: 13px; letter-spacing: 8px; font-weight: 300;
+            z-index: 10; pointer-events: none; mix-blend-mode: screen; transition: opacity 0.5s;
         }
         #error-log { position: fixed; top: 0; left: 0; background: rgba(255,0,0,0.8); color: #fff; z-index: 9999; font-family: monospace; padding: 10px; display: none; pointer-events: none; }
     </style>
@@ -31,7 +33,7 @@
         uniform vec3 uClickPos;
         uniform float uClickStrength;
 
-        attribute vec3 aRandom; // x: 속도, y: 흔들림, z: 크기
+        attribute vec3 aRandom; // x: 낙하속도, y: 흔들림, z: 입자크기
         attribute vec3 aColor;
 
         varying vec3 vColor;
@@ -42,39 +44,56 @@
             vColor = aColor;
             vAlpha = 1.0;
 
-            // 1. 위에서 아래로 쏟아지는 폭포수
-            float fallSpeed = 250.0 + (aRandom.x * 400.0);
+            // 1. 폭포수 낙하 애니메이션
+            float fallSpeed = 300.0 + (aRandom.x * 500.0);
             pos.y -= uTime * fallSpeed;
 
-            // 2. 무한 루프 (화면 아래로 가면 위에서 다시 생성)
+            // 무한 루프: 화면을 벗어나면 위에서 다시 시작
             pos.y = mod(pos.y + 2000.0, 4000.0) - 2000.0;
 
-            // 3. 미세한 흔들림 (물결 느낌)
-            pos.x += sin(uTime * 0.5 + pos.y * 0.005 + aRandom.y * 6.28) * 10.0;
+            // 공기 저항으로 인한 미세한 일렁임
+            pos.x += sin(uTime * 0.8 + pos.y * 0.01 + aRandom.y * 6.28) * 15.0;
 
-            // 4. 클릭 시 돌에 부딪히는 물보라(Splash) 효과
+            // 2. 바닥 소용돌이 (Floor Swirl - 이미지 레퍼런스 반영)
+            // 특정 Y 좌표(-800)를 바닥으로 설정하여 빛이 퍼져나가게 함
+            float floorY = -800.0;
+            if (pos.y < floorY) {
+                float depth = floorY - pos.y; // 바닥에 닿은 후 흘러간 거리
+                pos.y = floorY + (sin(pos.x * 0.01 + uTime) * 10.0); // 바닥을 평평하게 맞추되 약간의 물결 부여
+                
+                // 나선형으로 퍼져나가는 계산
+                float angle = atan(pos.z, pos.x) + depth * 0.002;
+                float radius = length(pos.xz) + depth * 0.8;
+                
+                pos.x = cos(angle) * radius;
+                pos.z = sin(angle) * radius;
+                
+                // 바닥에 깔리면 서서히 투명해짐
+                vAlpha = max(0.0, 1.0 - (depth / 1000.0));
+            }
+
+            // 3. 클릭 물보라 (Splash)
             float distToClick = distance(pos.xy, uClickPos.xy);
-            float effectRadius = 250.0; // 물보라 반경
+            float effectRadius = 350.0;
 
             if (distToClick < effectRadius && uClickStrength > 0.0) {
-                float force = pow(1.0 - (distToClick / effectRadius), 2.0) * uClickStrength;
+                float force = pow(1.0 - (distToClick / effectRadius), 2.5) * uClickStrength;
                 
-                // 폭포수가 튕겨나가는 방향 (무조건 위로 솟구치게 설계)
                 vec3 splashDir = normalize(pos - uClickPos);
-                splashDir.y = abs(splashDir.y) + 1.0; // Y축 방향으로 강하게 꺾임
-                splashDir.z += 0.5;
+                splashDir.y = abs(splashDir.y) + 1.2; // 무조건 위로 솟구치게
+                splashDir.z += 1.0; // 앞으로 튀어나옴
                 
-                pos += splashDir * force * 300.0;
+                pos += splashDir * force * 400.0;
                 
-                // 물보라가 일 때 하얗게 번쩍임
-                vColor = mix(vColor, vec3(1.0, 1.0, 1.0), force);
-                vAlpha = 1.0 + force;
+                // 물보라 발생 시 핫핑크/하얀색으로 발광
+                vColor = mix(vColor, vec3(1.0, 0.4, 0.8), force);
+                vAlpha = min(1.0, vAlpha + force);
             }
 
             vec4 mvPosition = modelViewMatrix * vec4(pos, 1.0);
             gl_Position = projectionMatrix * mvPosition;
             
-            // 원근감 반영한 크기
+            // 크기 및 원근감 설정
             gl_PointSize = aRandom.z * (1000.0 / -mvPosition.z);
         }
     </script>
@@ -86,18 +105,21 @@
         void main() {
             vec2 uv = gl_PointCoord.xy - vec2(0.5);
             
-            // X축을 강하게 압축시켜 세로로 얇고 긴 폭포수 형태로 만듦
-            uv.x *= 6.0; 
+            // 둥근 점을 세로로 길게 압축 (빛줄기 연출)
+            uv.x *= 8.0; 
             float dist = length(uv);
             
             if (dist > 0.5) discard;
             
-            float glow = pow(1.0 - (dist * 2.0), 1.5);
-            gl_FragColor = vec4(vColor, glow * vAlpha * 0.8);
+            // 쨍한 글로우 이펙트
+            float glow = pow(1.0 - (dist * 2.0), 1.8);
+            
+            gl_FragColor = vec4(vColor, glow * vAlpha * 0.9);
         }
     </script>
 
     <script>
+        // 에러 로그 출력용
         window.onerror = function(msg, url, line) {
             let err = document.getElementById('error-log');
             err.style.display = 'block'; err.innerHTML += msg + ' (Line: ' + line + ')<br>';
@@ -111,9 +133,8 @@
         let raycaster = new THREE.Raycaster();
         let mouse = new THREE.Vector2();
         
-        // 클릭 상호작용 변수
-        let clickPos = new THREE.Vector3(0, -5000, 0); // 화면 밖 초기화
-        let targetClickStrength = 0.0;
+        // 클릭 이벤트 데이터
+        let clickPos = new THREE.Vector3(0, -5000, 0); 
         let clickStrength = 0.0;
 
         init();
@@ -121,44 +142,45 @@
 
         function init() {
             scene = new THREE.Scene();
-            // 배경 안개로 멀리 있는 입자가 어둠에 묻히게 함
-            scene.fog = new THREE.FogExp2(0x000000, 0.0003); 
+            scene.fog = new THREE.FogExp2(0x000005, 0.00025); 
 
-            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 1, 4000);
-            camera.position.z = 1000;
+            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 1, 5000);
+            camera.position.z = 1200;
+            camera.position.y = -200; // 카메라를 살짝 내려서 바닥 소용돌이가 잘 보이게 세팅
 
             renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: "high-performance" });
             renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
             renderer.setSize(window.innerWidth, window.innerHeight);
-            renderer.setClearColor(0x000000, 1.0); 
+            renderer.setClearColor(0x000005, 1.0); 
             document.body.appendChild(renderer.domElement);
 
-            // 50만 개의 파티클 생성 (팀랩 수준의 밀도)
-            const particleCount = 500000;
+            // 60만 개의 대규모 파티클 (모바일/PC 모두 구동 가능한 최적화 수치)
+            const particleCount = 600000;
             const geometry = new THREE.BufferGeometry();
             
             const positions = new Float32Array(particleCount * 3);
             const randoms = new Float32Array(particleCount * 3);
             const colors = new Float32Array(particleCount * 3);
 
-            // 첨부해주신 이미지(image_48964b, 48966d)의 색상 팔레트
+            // 팀랩(teamLab) 이미지 기반 색상 추출
             const colorPalette = [
-                new THREE.Color(0x2266ff), // 푸른 폭포수
-                new THREE.Color(0x00aaff), // 밝은 시안
-                new THREE.Color(0x5500ff), // 딥 퍼플
-                new THREE.Color(0xff22aa)  // 마젠타 (꽃/포인트 색상)
+                new THREE.Color(0x1166ff), // 네온 블루
+                new THREE.Color(0x3399ff), // 시안 블루
+                new THREE.Color(0xaa22ff), // 딥 퍼플
+                new THREE.Color(0xff1188), // 핫 핑크 (꽃가루 느낌)
+                new THREE.Color(0xffffff)  // 코어 라이트
             ];
 
             for (let i = 0; i < particleCount; i++) {
-                // 넓은 벽면을 채우도록 배치
-                positions[i * 3] = (Math.random() - 0.5) * 4000;     // X
-                positions[i * 3 + 1] = (Math.random() - 0.5) * 4000; // Y
-                positions[i * 3 + 2] = (Math.random() - 0.5) * 1000; // Z 깊이
+                // X축 넓게, Y축 높게, Z축 깊게 배치
+                positions[i * 3] = (Math.random() - 0.5) * 5000;     
+                positions[i * 3 + 1] = (Math.random() - 0.5) * 4000; 
+                positions[i * 3 + 2] = (Math.random() - 0.5) * 2000; 
 
-                // 속도, 위상, 크기 랜덤
+                // 낙하속도, 흔들림, 입자 크기
                 randoms[i * 3] = Math.random();
                 randoms[i * 3 + 1] = Math.random();
-                randoms[i * 3 + 2] = 2.0 + Math.random() * 8.0;
+                randoms[i * 3 + 2] = 2.0 + Math.random() * 12.0;
 
                 const c = colorPalette[Math.floor(Math.random() * colorPalette.length)];
                 colors[i * 3] = c.r;
@@ -170,7 +192,6 @@
             geometry.setAttribute('aRandom', new THREE.BufferAttribute(randoms, 3));
             geometry.setAttribute('aColor', new THREE.BufferAttribute(colors, 3));
 
-            // 순수 파티클 쉐이더 매테리얼
             particleMaterial = new THREE.ShaderMaterial({
                 uniforms: {
                     uTime: { value: 0.0 },
@@ -180,20 +201,20 @@
                 vertexShader: document.getElementById('vertexShader').textContent,
                 fragmentShader: document.getElementById('fragmentShader').textContent,
                 transparent: true,
-                blending: THREE.AdditiveBlending, // 겹치면 밝게 빛남
+                blending: THREE.AdditiveBlending, // 빛 겹침 효과
                 depthWrite: false
             });
 
             particleSystem = new THREE.Points(geometry, particleMaterial);
             scene.add(particleSystem);
 
-            // 이벤트 리스너
+            // 리사이즈 및 클릭 이벤트
             window.addEventListener('resize', onWindowResize);
             document.addEventListener('mousedown', onPointerDown);
             document.addEventListener('touchstart', (e) => { e.preventDefault(); onPointerDown(e.touches[0]); }, { passive: false });
         }
 
-        // 클릭 시 3D 좌표를 찾아 돌에 부딪힌 듯한 물보라 발생
+        // 클릭 시 3D 좌표 추출 및 물보라 에너지 충전
         function onPointerDown(e) {
             document.getElementById('hint').style.opacity = '0';
             
@@ -201,14 +222,15 @@
             mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
 
             raycaster.setFromCamera(mouse, camera);
-            let plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0); // Z=0 평면
+            // 폭포수가 쏟아지는 주 평면(Z=0)과의 교차점 탐색
+            let plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0); 
             let intersectPoint = new THREE.Vector3();
             
             raycaster.ray.intersectPlane(plane, intersectPoint);
             
             if (intersectPoint) {
                 clickPos.copy(intersectPoint);
-                clickStrength = 1.0; // 물보라 힘 충전
+                clickStrength = 1.0; // 물보라 트리거!
             }
         }
 
@@ -222,20 +244,19 @@
             requestAnimationFrame(animate);
             const elapsedTime = clock.getElapsedTime();
 
-            // 물보라가 발생했다가 서서히 가라앉음
+            // 물보라 에너지 감소 처리 (터진 후 서서히 가라앉음)
             if (clickStrength > 0.0) {
                 clickStrength -= 0.015; 
                 if (clickStrength < 0) clickStrength = 0.0;
             }
 
-            // 쉐이더에 값 업데이트
+            // 쉐이더 유니폼 업데이트
             particleMaterial.uniforms.uTime.value = elapsedTime;
             particleMaterial.uniforms.uClickPos.value.copy(clickPos);
             particleMaterial.uniforms.uClickStrength.value = clickStrength;
 
-            // 카메라의 아주 미세한 유영
-            camera.position.x = Math.sin(elapsedTime * 0.2) * 20;
-            camera.position.y = Math.cos(elapsedTime * 0.15) * 20;
+            // 전시장 특유의 웅장한 카메라 무빙
+            camera.position.x = Math.sin(elapsedTime * 0.15) * 150;
             camera.lookAt(scene.position);
 
             renderer.render(scene, camera);
