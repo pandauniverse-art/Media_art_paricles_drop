@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Panda Universe - The Reality Tear (Vibe Upgraded)</title>
+    <title>Panda Universe - The Reality Tear (UPGRADED Vibe & Ink Spread)</title>
     <style>
         body { 
             margin: 0; overflow: hidden; background-color: #000; 
@@ -19,7 +19,7 @@
             z-index: 1;
         }
 
-        /* 2D 하얀색 웹사이트 레이어 (찢어지는 캔버스) */
+        /* 2D 하얀색 웹사이트 레이어 (번지는 캔버스) */
         #overlay-canvas {
             position: fixed;
             top: 0; left: 0;
@@ -35,17 +35,44 @@
             color: #000; font-size: 12px; letter-spacing: 3px; font-weight: bold;
             z-index: 3; pointer-events: none; transition: opacity 0.5s;
         }
+
+        /* 에러를 화면에 표시하는 헬퍼 함수 스타일 */
+        #error-log { position: fixed; top: 0; left: 0; background: rgba(255,0,0,0.8); color: #fff; z-index: 9999; font-family: monospace; padding: 10px; display: none; pointer-events: none; }
     </style>
 </head>
 <body>
-
+    <div id="error-log"></div>
     <div id="webgl-container"></div>
     <canvas id="overlay-canvas"></canvas>
-    <div id="hint">DRAG TO TEAR THE REALITY</div>
+    <div id="hint">CLICK TO SPREAD THE INK OF REALITY</div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 
     <script>
+        // 에러를 화면에 표시하는 헬퍼 함수
+        window.onerror = function(msg, url, line) {
+            var errDiv = document.getElementById('error-log');
+            errDiv.style.display = 'block';
+            errDiv.innerHTML += msg + ' (Line: ' + line + ')<br>';
+            return false;
+        };
+
+        // 오디오 에러(404)를 무시하는 안전한 실행 함수
+        function safeAudioPlay(audio, volume) {
+            if (audio) {
+                audio.volume = volume || 1.0;
+                audio.currentTime = 0;
+                var promise = audio.play();
+                if (promise !== undefined) { promise.catch(function(e) {}); }
+            }
+        }
+        function safeAudioPause(audio) {
+            if (audio) { audio.pause(); audio.currentTime = 0; }
+        }
+
+        let chargeAudio = new Audio('charge.mp3'); chargeAudio.loop = true;
+        let glitchAudio = new Audio('glitch.mp3'); glitchAudio.loop = true;
+
         // ========================================================
         // 1. WebGL 3D 우주 배경 (심연) 셋업
         // ========================================================
@@ -288,7 +315,7 @@
         blackHoleGroup.add(accretionDisk);
 
         // ========================================================
-        // 2. HTML5 Canvas 2D 오버레이 (찢어지는 평면) 셋업
+        // 2. HTML5 Canvas 2D 오버레이 (번지는 평면) 셋업
         // ========================================================
         const canvas = document.getElementById('overlay-canvas');
         const ctx = canvas.getContext('2d');
@@ -298,6 +325,22 @@
         let lastX = 0, lastY = 0;
         let targetMouseX = 0, targetMouseY = 0;
         let cameraX = 0, cameraY = 0;
+
+        // 잉크 번짐 객체 배열
+        const inkSpreads = [];
+        class InkSpread {
+            constructor(x, y) {
+                this.x = x;
+                this.y = y;
+                this.radius = 1;
+                this.growthRate = 15; // 번지는 속도
+                this.opacity = 1.0; // 투명도
+            }
+            update() {
+                this.radius += this.growthRate;
+                this.opacity -= 0.01; // 점점 투명해짐
+            }
+        }
 
         function initCanvas() {
             canvas.width = window.innerWidth;
@@ -321,14 +364,43 @@
             ctx.fillStyle = '#555555';
             ctx.fillText('3D MOTION GRAPHICS & MEDIA ART', centerX, centerY + 60);
             
+            // destinations-out 모드를클릭 후 번짐 효과 그리기 전용으로 사용
             ctx.globalCompositeOperation = 'destination-out';
         }
         initCanvas();
 
-        // 거친 종이가 찢어지는 듯한 브러시 로직
+        // 잉크 번짐 효과 그리기 로직
+        function handleInkSpreads() {
+            if (inkSpreads.length > 0) {
+                for (let i = inkSpreads.length - 1; i >= 0; i--) {
+                    let is = inkSpreads[i];
+                    is.update();
+
+                    ctx.beginPath();
+                    // SDF 기반의 완벽한 원형 그라데이션
+                    let gradient = ctx.createRadialGradient(is.x, is.y, 0, is.x, is.y, is.radius);
+                    gradient.addColorStop(0, `rgba(255, 255, 255, ${is.opacity})`);
+                    gradient.addColorStop(0.5, `rgba(255, 255, 255, ${is.opacity * 0.8})`);
+                    gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
+                    ctx.fillStyle = gradient;
+                    ctx.arc(is.x, is.y, is.radius, 0, Math.PI * 2);
+                    ctx.fill();
+
+                    // 투명도가 0이 되면 배열에서 제거
+                    if (is.opacity <= 0) {
+                        inkSpreads.splice(i, 1);
+                    }
+                }
+            }
+        }
+
+        // 거친 종이가 찢어지는 듯한 브러시 로직 (클릭 시 잉크 번짐 효과 추가)
         function drawTear(x, y) {
             hint.style.opacity = '0'; // 힌트 숨기기
             
+            // 잉크 번짐 객체 추가
+            inkSpreads.push(new InkSpread(x, y));
+
             ctx.beginPath();
             ctx.lineJoin = 'round'; ctx.lineCap = 'round';
             ctx.lineWidth = 100 + Math.random() * 60; // 두께 무작위로 하여 거칠게
@@ -385,7 +457,10 @@
             // 블랙홀 원반 자전 (더 빠르게)
             accretionDisk.rotation.z = -elapsedTime * 0.5;
 
-            // 3. 3D 패럴랙스(시차) 로직 (깊이감 극대화)
+            // 3. 캔버스 잉크 번짐 효과 갱신
+            handleInkSpreads();
+
+            // 4. 3D 패럴랙스(시차) 로직 (깊이감 극대화)
             cameraX += (targetMouseX * 1200 - cameraX) * 0.05; // 움직임 폭을 넓힘
             cameraY += (-targetMouseY * 1200 - cameraY) * 0.05;
             
