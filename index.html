@@ -23,7 +23,7 @@
         // --------------------------------------------------------
         // 1. 초기 설정
         // --------------------------------------------------------
-        const PARTICLE_COUNT = 500000; // 안정성을 위해 50만 개 셋팅. GPU 여유 시 100만 개 이상으로 상향 가능
+        const PARTICLE_COUNT = 100000; // 기존 50만 개의 20% 수준으로 조정
         const WATERFALL_WIDTH = 50;
         const WATERFALL_HEIGHT = 70;
         const WATERFALL_DEPTH = 20;
@@ -53,7 +53,7 @@
         document.body.appendChild(renderer.domElement);
 
         // --------------------------------------------------------
-        // 3. 메가 쉐이더 (에러 수정 완료)
+        // 3. 메가 쉐이더
         // --------------------------------------------------------
         const vertexShader = `
             uniform float uTime;
@@ -67,7 +67,7 @@
             varying vec3 vColor;
             varying float vAlpha;
 
-            // Simplex Noise (누락된 변수 복구 완료)
+            // Simplex Noise
             vec4 permute(vec4 x){return mod(((x*34.0)+1.0)*x, 289.0);}
             vec4 taylorInvSqrt(vec4 r){return 1.79284291400159 - 0.85373472095314 * r;}
             float snoise(vec3 v){ 
@@ -80,7 +80,6 @@
                 vec3 i1 = min( g.xyz, l.zxy );
                 vec3 i2 = max( g.xyz, l.zxy );
                 
-                // 이전 코드에서 누락되었던 핵심 변수 2개 복구
                 vec3 x1 = x0 - i1 + 1.0 * C.xxx;
                 vec3 x2 = x0 - i2 + 2.0 * C.xxx;
                 vec3 x3 = x0 - 1.0 + 3.0 * C.xxx;
@@ -214,7 +213,6 @@
 
         const instancedMesh = new THREE.InstancedMesh(geometry, material, PARTICLE_COUNT);
         
-        // [중요 수정] 파티클 수가 방대할 때 CPU가 뷰 프러스텀 연산을 하려다 뻗는 현상 차단
         instancedMesh.frustumCulled = false; 
 
         const offsets = new Float32Array(PARTICLE_COUNT * 3);
